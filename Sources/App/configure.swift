@@ -9,11 +9,14 @@ public func configure(_ app: Application) async throws {
     // app.middleware.use(FileMiddleware(publicDirectory: app.directory.publicDirectory))
     
     if let databaseURL = Environment.get("DATABASE_URL") {
-        var postgresConfig = PostgresConfiguration(url: databaseURL)
-        var tlsConfig = TLSConfiguration.makeClientConfiguration()
+        var tlsConfig: TLSConfiguration = .makeClientConfiguration()
         tlsConfig.certificateVerification = .none
-        postgresConfig?.tlsConfiguration = tlsConfig
-        app.databases.use(.postgres(configuration: postgresConfig!), as: .psql)
+        let nioSSLContext = try NIOSSLContext(configuration: tlsConfig)
+        
+        var postgresConfig = try SQLPostgresConfiguration(url: databaseURL)
+        postgresConfig.coreConfiguration.tls = .require(nioSSLContext)
+        
+        app.databases.use(.postgres(configuration: postgresConfig), as: .psql)
     }  else {
         app.databases.use(DatabaseConfigurationFactory.postgres(configuration: .init(
             hostname: Environment.get("DATABASE_HOST") ?? "localhost",
@@ -27,10 +30,8 @@ public func configure(_ app: Application) async throws {
     }
     
     app.migrations.add(CreateSongs())
+    try app.autoMigrate().wait()
     
-    if app.environment == .development {
-        try app.autoMigrate().wait()
-    }
     
     // register routes
     try routes(app)
